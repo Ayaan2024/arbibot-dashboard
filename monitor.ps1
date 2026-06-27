@@ -3,7 +3,7 @@
 
 function Get-BotStatus {
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:5000/api/status" -UseBasicParsing
+        $response = Invoke-WebRequest -Uri "http://localhost:5003/api/status" -UseBasicParsing
         return $response.Content | ConvertFrom-Json
     }
     catch {
@@ -36,7 +36,7 @@ while ($true) {
     
     if ($null -eq $statusData) {
         Write-Host "❌ Cannot connect to bot API" -ForegroundColor Red
-        Write-Host "Make sure bot_api.py is running on port 5000" -ForegroundColor Yellow
+        Write-Host "Make sure bot_api.py is running on port 5003" -ForegroundColor Yellow
         Start-Sleep -Seconds 5
         continue
     }

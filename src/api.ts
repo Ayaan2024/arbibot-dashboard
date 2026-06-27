@@ -3,10 +3,11 @@
  * This module provides functions to communicate with the bot API.
  */
 
-const API_PORT = typeof window !== "undefined" && window.location.port === "5174" ? "5002" : "5000";
-const API_BASE = typeof window !== "undefined"
-  ? `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
-  : `http://127.0.0.1:${API_PORT}`;
+const API_BASE: string =
+  (import.meta as any).env?.VITE_API_URL ||
+  (typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:5003`
+    : "http://127.0.0.1:5003");
 
 export const API = {
   // Status endpoints
