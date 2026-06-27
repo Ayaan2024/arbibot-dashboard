@@ -5,9 +5,7 @@
 
 const API_BASE: string =
   (import.meta as any).env?.VITE_API_URL ||
-  (typeof window !== "undefined"
-    ? `${window.location.protocol}//${window.location.hostname}:5003`
-    : "http://127.0.0.1:5003");
+  "http://164.92.241.83:5000";
 
 export const API = {
   // Status endpoints
