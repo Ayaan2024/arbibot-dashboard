@@ -1,0 +1,20 @@
+[Unit]
+Description=LMS Arbitrage Bot API (Gunicorn)
+Requires=bot-api-gunicorn.socket
+After=network.target
+
+[Service]
+Type=simple
+User=lmsarb
+Group=www-data
+WorkingDirectory=/opt/lms-arb
+EnvironmentFile=/opt/lms-arb/.env
+ExecStart=/opt/lms-arb/deploy/start_gunicorn.sh
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

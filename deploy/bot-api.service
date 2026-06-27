@@ -1,0 +1,16 @@
+[Unit]
+Description=LMS Arbitrage Bot API
+After=network.target
+
+[Service]
+Type=simple
+User=lmsarb
+Group=lmsarb
+WorkingDirectory=/opt/lms-arb
+EnvironmentFile=/opt/lms-arb/.env
+ExecStart=/opt/lms-arb/deploy/start_bot.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

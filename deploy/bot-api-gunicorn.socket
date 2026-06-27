@@ -1,0 +1,11 @@
+[Unit]
+Description=LMS Arbitrage Bot API Gunicorn socket
+
+[Socket]
+ListenStream=/run/bot-api-gunicorn.sock
+SocketMode=0660
+SocketUser=www-data
+SocketGroup=www-data
+
+[Install]
+WantedBy=sockets.target
