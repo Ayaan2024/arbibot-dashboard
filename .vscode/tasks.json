@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Vite 5174",
+			"type": "shell",
+			"command": "\"C:\\Program Files\\nodejs\\npm.cmd\"",
+			"args": [
+				"run",
+				"dev",
+				"--",
+				"--host",
+				"--port",
+				"5174"
+			],
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}

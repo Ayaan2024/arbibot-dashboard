@@ -22,14 +22,6 @@ This guide shows how to connect MetaMask / Trust Wallet to control the DEX arbit
                        │ Shared state or subprocess
                        │
 ┌──────────────────────▼───────────────────────────────────────┐
-│  Node Proxy Server (port 4000)                               │
-│  - /proxy/binance/ticker/price                                │
-│  - /proxy/binance/ticker/bookTicker                          │
-│  - Provides live Binance market data to the dashboard        │
-└──────────────────────┬───────────────────────────────────────┘
-                       │ Market data API requests
-                       │
-┌──────────────────────▼───────────────────────────────────────┐
 │  Python Bot (dex arb ultimate (1).py)                        │
 │  - Runs trading logic                                        │
 │  - Updates state with API server                             │
@@ -64,28 +56,12 @@ In a **new terminal**:
 ```bash
 cd c:\Users\munira\Downloads
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
-npm run dev -- --host --port 5176 --strictPort
+npm run dev -- --host
 ```
 
-Open the URL in your browser: `http://localhost:5176`.
+Open the URL in your browser, e.g., `http://localhost:5173`.
 
-On Windows, you can also double-click [run_dashboard.bat](run_dashboard.bat) from the workspace root.
-If you want both the dashboard and live-price proxy, double-click [run_all.bat](run_all.bat) instead.
-
-### 4. Run the Live Price Proxy
-
-In a **new terminal**:
-
-```bash
-cd c:\Users\munira\Downloads
-npm run proxy:dev
-```
-
-This starts the Node proxy on `http://localhost:4000` and feeds real Binance prices into the dashboard.
-
-On Windows, you can also double-click [run_proxy.bat](run_proxy.bat) from the workspace root.
-
-### 5. Configure the Python Bot
+### 4. Configure the Python Bot
 
 Edit `c:\Users\munira\Desktop\dex arb ultimate (1).py`:
 
@@ -95,7 +71,7 @@ Edit `c:\Users\munira\Desktop\dex arb ultimate (1).py`:
 - `WITHDRAWAL_ADDRESS` = where profits are sent
 - `STARTING_CAPITAL` = 50 (or your amount)
 
-### 6. Run the Bot
+### 5. Run the Bot
 
 In a **new terminal**:
 

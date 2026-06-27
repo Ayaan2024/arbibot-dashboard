@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
-import API from "./api";
+import { useState, useEffect, useRef } from "react";
 
 const PAIRS = ["BNB/USDT", "CAKE/USDT", "ETH/USDT", "XRP/USDT", "BUSD/USDT"];
 const DEXES = [
@@ -17,9 +16,6 @@ const PHASES = [
   { label: "Evaluating Liquidity Depth",  icon: "💧", color: "#34d399" },
 ];
 
-const TRADE_THRESHOLD = 0.8;
-const FLASH_LOAN_THRESHOLD = 0.9;
-
 function rand(min, max) { return Math.random() * (max - min) + min; }
 
 function generatePrices() {
@@ -34,7 +30,7 @@ function generatePrices() {
   PAIRS.forEach(pair => {
     prices[pair] = {};
     DEXES.forEach(dex => {
-      prices[pair][dex.name] = base[pair] * (1 + rand(-0.0065, 0.0065));
+      prices[pair][dex.name] = base[pair] * (1 + rand(-0.005, 0.005));
     });
   });
   return prices;
@@ -49,7 +45,7 @@ function findOpportunities(prices) {
     return {
       pair, buyOn: minE[0], sellOn: maxE[0],
       buyPrice: minE[1], sellPrice: maxE[1],
-      gap, profitable: gap > TRADE_THRESHOLD, flashLoan: gap > FLASH_LOAN_THRESHOLD,
+      gap, profitable: gap > 0.8, flashLoan: gap > 1.0,
     };
   }).sort((a, b) => b.gap - a.gap);
 }
@@ -78,14 +74,8 @@ function Pulse({ active, color = "#22c55e" }) {
 }
 
 export default function MobileDashboard() {
-  const SCANS_PER_DAY = 6;
-  const DAYS_PER_CYCLE = 7;
-  const SCANS_PER_CYCLE = SCANS_PER_DAY * DAYS_PER_CYCLE;
-  const AUTO_WITHDRAW_PERCENT = 100;
-
   const [running, setRunning]           = useState(false);
   const [tab, setTab]                   = useState("home");
-  const [startingCapital, setStartingCapital] = useState(50);
   const [prices, setPrices]             = useState(generatePrices());
   const [phase, setPhase]               = useState(0);
   const [nextScan, setNextScan]         = useState(10);
@@ -101,19 +91,10 @@ export default function MobileDashboard() {
   const [logs, setLogs]                 = useState([]);
   const [dexScores, setDexScores]       = useState({ PancakeSwap: 0, Biswap: 0, ApeSwap: 0 });
   const [stageLoopTick, setStageLoopTick] = useState(0);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [walletStatus, setWalletStatus]   = useState<string>("Not connected");
-  const [walletError, setWalletError]     = useState<string | null>(null);
-  const [chainId, setChainId]             = useState<string | null>(null);
-  const [walletProviderName, setWalletProviderName] = useState<string>("Unknown");
-  const [autoWithdrawEnabled, setAutoWithdrawEnabled] = useState(true);
-  const [binanceAddress, setBinanceAddress] = useState("");
-  const [totalWithdrawn, setTotalWithdrawn] = useState(0);
   const intervalRef = useRef(null);
   const countRef    = useRef(null);
   const uptimeRef   = useRef(null);
   const tradeId     = useRef(0);
-  const scanCounterRef = useRef(0);
 
   const opps = findOpportunities(prices);
 
@@ -121,271 +102,61 @@ export default function MobileDashboard() {
     setLogs(prev => [{ id: Date.now(), time: new Date().toLocaleTimeString(), msg, type }, ...prev.slice(0, 30)]);
   };
 
-  const shortAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;
-
-  const detectProviderName = (ethereum: any) => {
-    if (ethereum?.isTrust || ethereum?.isTrustWallet) return "Trust Wallet";
-    if (ethereum?.isMetaMask) return "MetaMask";
-    return "Injected Wallet";
-  };
-
-  const withdrawProfitNow = async () => {
-    if (cycleProfit <= 0) {
-      addLog("No profits to withdraw yet.", "info");
-      return;
-    }
-
-    if (!walletAddress) {
-      setWalletError("Connect Trust Wallet or MetaMask first.");
-      return;
-    }
-
-    if (!binanceAddress || !binanceAddress.startsWith("0x") || binanceAddress.length !== 42) {
-      setWalletError("Enter a valid Binance BEP20 deposit address.");
-      return;
-    }
-
-    try {
-      const amount = cycleProfit;
-      const result = await API.withdrawProfits(amount, binanceAddress);
-      if (!result.success) {
-        setWalletError(result.error || "Withdrawal failed");
-        return;
-      }
-
-      setCycleProfit(0);
-      setTotalWithdrawn(Number(result.total_withdrawn ?? 0));
-      setWalletError(null);
-      addLog(`🏦 Withdrew $${amount.toFixed(2)} profits to Binance ${shortAddress(binanceAddress)}`, "success");
-    } catch (error: any) {
-      setWalletError(error?.message || "Withdrawal failed");
-    }
-  };
-
-  const withdrawAtCycleEnd = async () => {
-    if (!autoWithdrawEnabled || cycleProfit <= 0) return;
-    if (!walletAddress) return;
-    if (!binanceAddress || !binanceAddress.startsWith("0x") || binanceAddress.length !== 42) return;
-
-    const amount = Number((cycleProfit * (AUTO_WITHDRAW_PERCENT / 100)).toFixed(2));
-    if (amount <= 0) return;
-
-    try {
-      const result = await API.withdrawProfits(amount, binanceAddress);
-      if (!result.success) {
-        addLog(`Auto-withdraw failed: ${result.error || "Unknown error"}`, "info");
-        return;
-      }
-
-      setCycleProfit(prev => Math.max(0, Number((prev - amount).toFixed(2))));
-      setTotalWithdrawn(Number(result.total_withdrawn ?? 0));
-      addLog(`🔁 Cycle end: withdrew ${AUTO_WITHDRAW_PERCENT}% ($${amount.toFixed(2)}) to Binance ${shortAddress(binanceAddress)}`, "success");
-    } catch {
-      addLog("Auto-withdraw failed at cycle end.", "info");
-    }
-  };
-
-  const setWalletFromAccounts = (accounts: string[]) => {
-    if (accounts && accounts.length > 0) {
-      setWalletAddress(accounts[0]);
-      setWalletStatus("Connected");
-      setWalletError(null);
-    } else {
-      setWalletAddress(null);
-      setWalletStatus("Not connected");
-    }
-  };
-
-  const connectWallet = async () => {
-    const ethereum = (window as any).ethereum;
-    if (!ethereum) {
-      setWalletError("MetaMask / Trust Wallet provider not found.");
-      return;
-    }
-
-    try {
-      const accounts = await ethereum.request({ method: "eth_requestAccounts" });
-      setWalletFromAccounts(accounts);
-      const chain = await ethereum.request({ method: "eth_chainId" });
-      setChainId(chain);
-      setWalletProviderName(detectProviderName(ethereum));
-      await API.connectWallet(accounts[0]);
-      addLog("Wallet connected: " + accounts[0], "success");
-    } catch (error: any) {
-      setWalletError(error?.message || "Connection rejected");
-    }
-  };
-
-  const disconnectWallet = () => {
-    setWalletAddress(null);
-    setWalletStatus("Not connected");
-    setChainId(null);
-    setWalletProviderName("Unknown");
-    API.disconnectWallet().catch(() => {});
-    addLog("Wallet disconnected", "info");
-  };
-
-  useEffect(() => {
-    const ethereum = (window as any).ethereum;
-    if (!ethereum) {
-      setWalletError("MetaMask / Trust Wallet provider not found.");
-    } else {
-      setWalletProviderName(detectProviderName(ethereum));
-
-      ethereum.request({ method: "eth_accounts" })
-        .then((accounts: string[]) => setWalletFromAccounts(accounts))
-        .catch(() => {});
-
-      const handleAccountsChanged = (accounts: string[]) => setWalletFromAccounts(accounts);
-      const handleChainChanged = (chain: string) => setChainId(chain);
-
-      ethereum.on?.("accountsChanged", handleAccountsChanged);
-      ethereum.on?.("chainChanged", handleChainChanged);
-
-      return () => {
-        ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
-        ethereum.removeListener?.("chainChanged", handleChainChanged);
-      };
-    }
-  }, []);
-
-  useEffect(() => {
-    const syncStatus = async () => {
-      try {
-        const result = await API.getStatus();
-        if (!result?.success || !result?.status) return;
-
-        setRunning(Boolean(result.status.running));
-        setStartingCapital(Number(result.status.starting_capital ?? 50));
-        setTotalWithdrawn(Number(result.status.total_withdrawn ?? 0));
-        if (result.status.wallet_connected) {
-          setWalletAddress(result.status.wallet_connected);
-          setWalletStatus("Connected");
-        }
-      } catch {
-        // Keep demo mode responsive even if the API is briefly unavailable.
-      }
-    };
-
-    syncStatus();
-    const syncTimer = setInterval(syncStatus, 5000);
-    return () => clearInterval(syncTimer);
-  }, []);
-
   useEffect(() => {
     if (running) {
       uptimeRef.current = setInterval(() => setUptime(u => u + 1), 1000);
 
       const doScan = () => {
-        void (async () => {
-          let newPrices = generatePrices();
-          let newOpps = findOpportunities(newPrices);
-          let liveMode = false;
+        const newPrices = generatePrices();
+        setPrices(newPrices);
+        setScanCount(c => c + 1);
+        setNextScan(10);
+        setPhase(p => (p + 1) % PHASES.length);
+        setDexScores({
+          PancakeSwap: Math.round(rand(55, 95)),
+          Biswap:      Math.round(rand(45, 90)),
+          ApeSwap:     Math.round(rand(35, 85)),
+        });
 
-          try {
-            const live = await API.getLiveScan();
-            if (live?.success && live?.prices && live?.opportunities) {
-              newPrices = live.prices;
-              newOpps = live.opportunities;
-              liveMode = true;
-            }
-          } catch {
-            // Keep simulator fallback when live endpoint is unavailable.
-          }
+        const newOpps     = findOpportunities(newPrices);
+        const profitable  = newOpps.filter(o => o.profitable);
 
-          setPrices(newPrices);
+        if (profitable.length > 0) {
+          const opp     = profitable[0];
+          const isFlash = opp.flashLoan;
+          const isTri   = !isFlash && Math.random() > 0.7;
+          const profit  = isFlash
+            ? parseFloat(rand(40, 120).toFixed(2))
+            : isTri
+            ? parseFloat(rand(0.5, 2).toFixed(2))
+            : parseFloat(rand(0.3, 1.5).toFixed(2));
 
-          scanCounterRef.current += 1;
-          const nextScanCount = scanCounterRef.current;
-          setScanCount(nextScanCount);
-          setNextScan(10);
-          setPhase(p => (p + 1) % PHASES.length);
+          const trade = {
+            id: tradeId.current++,
+            time: new Date().toLocaleTimeString(),
+            pair: opp.pair,
+            buy: opp.buyOn, sell: opp.sellOn,
+            gap: opp.gap.toFixed(3),
+            profit, isFlash, isTri,
+            hash: "0x" + Math.random().toString(16).slice(2, 10) + "...",
+          };
 
-          const dayInCycle = ((Math.floor((nextScanCount - 1) / SCANS_PER_DAY)) % DAYS_PER_CYCLE) + 1;
-          setCycleDay(dayInCycle);
+          setTrades(prev => [trade, ...prev.slice(0, 19)]);
+          setCycleProfit(p => parseFloat((p + profit).toFixed(2)));
+          setTotalProfit(p => parseFloat((p + profit).toFixed(2)));
+          setTotalTrades(t => t + 1);
+          if (isFlash) setFlashTrades(f => f + 1);
+          if (isTri)   setTriTrades(t => t + 1);
 
-          if (nextScanCount % SCANS_PER_CYCLE === 0) {
-            void withdrawAtCycleEnd();
-            addLog("📅 Cycle ended. Starting a new cycle.", "info");
-          }
-
-          setDexScores({
-            PancakeSwap: Math.round(rand(55, 95)),
-            Biswap:      Math.round(rand(45, 90)),
-            ApeSwap:     Math.round(rand(35, 85)),
-          });
-
-          const profitable = newOpps.filter((o: any) => o.profitable);
-
-          if (profitable.length > 0) {
-            const flashCandidates = profitable.filter((o: any) => o.flashLoan);
-            const nonFlashCandidates = profitable.filter((o: any) => !o.flashLoan);
-
-            let opp = profitable[0];
-            let isFlash = false;
-            let isTri = false;
-
-            if (flashCandidates.length > 0 && nonFlashCandidates.length > 0) {
-              const totalSpecialTrades = flashTrades + triTrades;
-              const currentFlashShare = totalSpecialTrades > 0 ? flashTrades / totalSpecialTrades : 0;
-              const targetFlashShare = 0.55;
-              const chooseFlash = currentFlashShare < targetFlashShare;
-
-              if (chooseFlash) {
-                opp = flashCandidates[0];
-                isFlash = true;
-              } else {
-                opp = nonFlashCandidates[0];
-                isTri = true;
-              }
-            } else if (flashCandidates.length > 0) {
-              opp = flashCandidates[0];
-              isFlash = true;
-            } else {
-              opp = nonFlashCandidates[0] || profitable[0];
-              isTri = true;
-            }
-
-            const profit = liveMode
-              ? parseFloat((Math.max(0.2, Math.min(8, Number(opp.gap) * 1.8))).toFixed(2))
-              : isFlash
-              ? parseFloat(rand(40, 120).toFixed(2))
-              : isTri
-              ? parseFloat(rand(0.5, 2).toFixed(2))
-              : parseFloat(rand(0.3, 1.5).toFixed(2));
-
-            const trade = {
-              id: tradeId.current++,
-              time: new Date().toLocaleTimeString(),
-              pair: opp.pair,
-              buy: opp.buyOn,
-              sell: opp.sellOn,
-              gap: Number(opp.gap).toFixed(3),
-              profit,
-              isFlash,
-              isTri,
-              hash: "0x" + Math.random().toString(16).slice(2, 10) + "...",
-            };
-
-            setTrades(prev => [trade, ...prev.slice(0, 19)]);
-            setCycleProfit(p => parseFloat((p + profit).toFixed(2)));
-            setTotalProfit(p => parseFloat((p + profit).toFixed(2)));
-            setTotalTrades(t => t + 1);
-            if (isFlash) setFlashTrades(f => f + 1);
-            if (isTri) setTriTrades(t => t + 1);
-
-            addLog(
-              isFlash
-                ? `⚡ Flash loan${liveMode ? " [LIVE BSC]" : ""}: ${opp.pair} +${Number(opp.gap).toFixed(3)}% → $${profit}`
-                : isTri
-                ? `🔺 Triangle${liveMode ? " [LIVE BSC]" : ""}: ${opp.pair} → $${profit}`
-                : `✅ Trade${liveMode ? " [LIVE BSC]" : ""}: ${opp.pair} +${Number(opp.gap).toFixed(3)}% → $${profit}`,
-              isFlash ? "flash" : isTri ? "tri" : "success"
-            );
-          } else {
-            addLog(`🔍 Scan #${nextScanCount}${liveMode ? " [LIVE BSC]" : ""} — no gap above ${TRADE_THRESHOLD}%`, "info");
-          }
-        })();
+          addLog(
+            isFlash ? `⚡ Flash loan: ${opp.pair} +${opp.gap.toFixed(3)}% → $${profit}`
+            : isTri  ? `🔺 Triangle: ${opp.pair} → $${profit}`
+            :          `✅ Trade: ${opp.pair} +${opp.gap.toFixed(3)}% → $${profit}`,
+            isFlash ? "flash" : isTri ? "tri" : "success"
+          );
+        } else {
+          addLog(`🔍 Scan #${scanCount + 1} — no gap above 0.8%`, "info");
+        }
       };
 
       doScan();
@@ -449,6 +220,7 @@ export default function MobileDashboard() {
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
+      {/* Status Bar */}
       <div style={{
         padding: "10px 20px 6px",
         display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -460,6 +232,7 @@ export default function MobileDashboard() {
         </div>
       </div>
 
+      {/* Header */}
       <div style={{
         padding: "8px 20px 16px",
         borderBottom: "1px solid #1e293b",
@@ -494,11 +267,14 @@ export default function MobileDashboard() {
         </div>
       </div>
 
+      {/* Scrollable Content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 80px" }}>
 
+        {/* HOME TAB */}
         {tab === "home" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
+            {/* Profit Card */}
             <div style={{
               background: "linear-gradient(135deg, #0d2137, #1a0d37)",
               border: "1px solid #1e3a5f",
@@ -516,11 +292,6 @@ export default function MobileDashboard() {
               </div>
               <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
                 All time: <strong style={{ color: "#a78bfa" }}>${totalProfit.toFixed(2)}</strong>
-              </div>
-              <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
-                Starting capital: <strong style={{ color: "#38bdf8" }}>${startingCapital.toFixed(2)}</strong>
-                {" · "}
-                Withdrawn: <strong style={{ color: "#4ade80" }}>${totalWithdrawn.toFixed(2)}</strong>
               </div>
               <div style={{
                 display: "flex", justifyContent: "center", gap: 20,
@@ -546,6 +317,7 @@ export default function MobileDashboard() {
               </div>
             </div>
 
+            {/* Scan Phase */}
             <div style={{
               background: "#0d1424", border: "1px solid #1e293b",
               borderRadius: 16, padding: 16,
@@ -557,6 +329,7 @@ export default function MobileDashboard() {
                 </span>
               </div>
 
+              {/* Current Phase */}
               <div style={{
                 background: running ? "#0a1a2a" : "#080c18",
                 border: `1px solid ${running ? currentPhase.color + "44" : "#1e293b"}`,
@@ -578,6 +351,7 @@ export default function MobileDashboard() {
                 </div>
               </div>
 
+              {/* Phase Steps */}
               <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
                 {PHASES.map((p, i) => {
                   const isActive = running && i === activeStageIndex;
@@ -620,6 +394,7 @@ export default function MobileDashboard() {
                 })}
               </div>
 
+              {/* DEX Bars */}
               {DEXES.map(dex => (
                 <div key={dex.name} style={{ marginBottom: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -640,6 +415,7 @@ export default function MobileDashboard() {
               ))}
             </div>
 
+            {/* Best Opportunity */}
             {opps[0] && running && (
               <div style={{
                 background: opps[0].flashLoan ? "#0d0020" : opps[0].profitable ? "#0a1a0a" : "#0d1424",
@@ -677,117 +453,7 @@ export default function MobileDashboard() {
               </div>
             )}
 
-            <div style={{
-              background: "#0d1424", border: "1px solid #1e293b",
-              borderRadius: 16, padding: 16,
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8" }}>WALLET & WITHDRAW</span>
-                <span style={{ fontSize: 10, color: "#475569" }}>{walletProviderName}</span>
-              </div>
-
-              <div style={{
-                background: "#080c18", border: "1px solid #1e293b", borderRadius: 10,
-                padding: 10, marginBottom: 10,
-              }}>
-                <div style={{ fontSize: 11, color: "#64748b" }}>
-                  Status: <strong style={{ color: walletAddress ? "#4ade80" : "#94a3b8" }}>{walletStatus}</strong>
-                </div>
-                <div style={{ fontSize: 10, color: "#475569", marginTop: 4 }}>
-                  {walletAddress ? `Wallet: ${shortAddress(walletAddress)}` : "Connect Trust Wallet / MetaMask to withdraw profits"}
-                </div>
-                {chainId && (
-                  <div style={{ fontSize: 10, color: "#334155", marginTop: 2 }}>
-                    Chain: {chainId === "0x38" ? "BSC Mainnet" : chainId}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                {!walletAddress ? (
-                  <button onClick={connectWallet} style={{
-                    flex: 1, border: "none", borderRadius: 10, cursor: "pointer",
-                    background: "linear-gradient(135deg, #2563eb, #7c3aed)",
-                    color: "#fff", fontSize: 12, fontWeight: 700, padding: "10px 12px",
-                  }}>
-                    Connect Trust Wallet / MetaMask
-                  </button>
-                ) : (
-                  <button onClick={disconnectWallet} style={{
-                    flex: 1, border: "1px solid #7f1d1d", borderRadius: 10, cursor: "pointer",
-                    background: "#1f0d0d", color: "#fecaca", fontSize: 12, fontWeight: 700, padding: "10px 12px",
-                  }}>
-                    Disconnect Wallet
-                  </button>
-                )}
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                <label style={{ fontSize: 10, color: "#64748b", display: "flex", flexDirection: "column", gap: 4 }}>
-                  Starting Capital (USDT)
-                  <input
-                    type="number"
-                    min={50}
-                    step={10}
-                    value={startingCapital}
-                    onChange={(e) => setStartingCapital(Math.max(50, Number(e.target.value) || 50))}
-                    style={{
-                      background: "#080c18", border: "1px solid #1e293b", borderRadius: 8,
-                      color: "#e2e8f0", padding: "8px 10px", fontSize: 12,
-                    }}
-                      <span style={{ fontSize: 18, marginRight: 8 }}>🦊</span> MetaMask
-                </label>
-
-                <label style={{ fontSize: 10, color: "#64748b", display: "flex", flexDirection: "column", gap: 4 }}>
-                  Withdraw Percent
-                  <div style={{
-                    background: "#080c18", border: "1px solid #1e293b", borderRadius: 8,
-                    color: "#4ade80", padding: "8px 10px", fontSize: 12, fontWeight: 700,
-                  }}>
-                    {AUTO_WITHDRAW_PERCENT}% (at cycle end)
-                  </div>
-                </label>
-              </div>
-
-              <label style={{ fontSize: 10, color: "#64748b", display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-                Binance BEP20 Address (Profit Receiver)
-                <input
-                  type="text"
-                  placeholder="0x..."
-                  value={binanceAddress}
-                  onChange={(e) => setBinanceAddress(e.target.value.trim())}
-                  style={{
-                    background: "#080c18", border: "1px solid #1e293b", borderRadius: 8,
-                    color: "#e2e8f0", padding: "8px 10px", fontSize: 12,
-                  }}
-                    <span style={{ fontSize: 18, marginRight: 8 }}>🔵</span> Trust Wallet
-              </label>
-
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontSize: 11, color: "#94a3b8" }}>Auto withdraw profits to Binance</span>
-                <button onClick={() => setAutoWithdrawEnabled(v => !v)} style={{
-                  border: "1px solid #1e293b", borderRadius: 999,
-                  background: autoWithdrawEnabled ? "#052e16" : "#111827",
-                  color: autoWithdrawEnabled ? "#4ade80" : "#64748b",
-                  padding: "4px 10px", fontSize: 10, fontWeight: 700, cursor: "pointer",
-                }}>
-                  {autoWithdrawEnabled ? "ON" : "OFF"}
-                </button>
-              </div>
-
-              <button onClick={withdrawProfitNow} style={{
-                width: "100%", border: "none", borderRadius: 10, cursor: "pointer",
-                background: "linear-gradient(135deg, #0f766e, #2563eb)",
-                color: "#fff", fontSize: 13, fontWeight: 800, padding: "11px 12px",
-              }}>
-                Withdraw Profit Now (${cycleProfit.toFixed(2)})
-              </button>
-
-              {walletError && (
-                <div style={{ marginTop: 8, fontSize: 10, color: "#fda4af" }}>{walletError}</div>
-              )}
-            </div>
-
+            {/* 7-Day Progress */}
             <div style={{
               background: "#0d1424", border: "1px solid #1e293b",
               borderRadius: 16, padding: 16,
@@ -818,42 +484,19 @@ export default function MobileDashboard() {
                 fontSize: 11, color: "#475569",
               }}>
                 <span>💰 Profit: <strong style={{ color: "#4ade80" }}>${cycleProfit.toFixed(2)}</strong></span>
-                <span>🏦 Capital: <strong style={{ color: "#38bdf8" }}>${startingCapital.toFixed(2)} safe</strong></span>
+                <span>🏦 Capital: <strong style={{ color: "#38bdf8" }}>$100 safe</strong></span>
               </div>
             </div>
 
-            <button onClick={async () => {
+            {/* Start/Stop Button */}
+            <button onClick={() => {
               if (!running) {
-                try {
-                  const result = await API.startBot(startingCapital, true, {
-                    binance_address: binanceAddress || null,
-                    auto_withdraw_enabled: autoWithdrawEnabled,
-                    auto_withdraw_percentage: AUTO_WITHDRAW_PERCENT,
-                  });
-                  if (!result.success) {
-                    addLog(result.error || "Failed to start bot", "info");
-                    return;
-                  }
-                } catch {
-                  addLog("Backend start failed; staying in demo mode.", "info");
-                }
-
                 setUptime(0); setCycleProfit(0);
                 setTrades([]); setLogs([]); setScanCount(0);
                 setTotalTrades(0); setFlashTrades(0); setTriTrades(0);
                 setTotalProfit(0);
-                setTotalWithdrawn(0);
-                setCycleDay(1);
-                scanCounterRef.current = 0;
-                setRunning(true);
-              } else {
-                try {
-                  await API.stopBot();
-                } catch {
-                  // Allow local demo stop even if API stop fails.
-                }
-                setRunning(false);
               }
+              setRunning(r => !r);
             }} style={{
               width: "100%", padding: "18px",
               borderRadius: 16, border: "none",
@@ -870,6 +513,7 @@ export default function MobileDashboard() {
               {running ? "⏹  Stop Bot" : "▶  Start Bot Engine"}
             </button>
 
+            {/* Protections */}
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 1fr",
               gap: 8,
@@ -898,6 +542,7 @@ export default function MobileDashboard() {
           </div>
         )}
 
+        {/* TRADES TAB */}
         {tab === "trades" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>💱 Trade History</div>
@@ -936,6 +581,7 @@ export default function MobileDashboard() {
           </div>
         )}
 
+        {/* PRICES TAB */}
         {tab === "prices" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>🔍 Price Screener</div>
@@ -990,6 +636,7 @@ export default function MobileDashboard() {
           </div>
         )}
 
+        {/* LOGS TAB */}
         {tab === "logs" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -1025,6 +672,7 @@ export default function MobileDashboard() {
         )}
       </div>
 
+      {/* Bottom Navigation */}
       <div style={{
         position: "fixed", bottom: 0, left: "50%",
         transform: "translateX(-50%)",

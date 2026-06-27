@@ -3,11 +3,10 @@
  * This module provides functions to communicate with the bot API.
  */
 
-const API_BASE: string =
-  (import.meta as any).env?.VITE_API_URL ||
-  (typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:5003"
-    : `http://${window.location.hostname}:5003`);
+const API_PORT = typeof window !== "undefined" && window.location.port === "5174" ? "5002" : "5000";
+const API_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
+  : `http://127.0.0.1:${API_PORT}`;
 
 export const API = {
   // Status endpoints
@@ -22,11 +21,11 @@ export const API = {
   },
 
   // Bot control
-  async startBot(startingCapital = 50, dryRun = true) {
+  async startBot(startingCapital = 50, dryRun = false, options = {}) {
     const res = await fetch(`${API_BASE}/api/bot/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ starting_capital: startingCapital, dry_run: dryRun }),
+      body: JSON.stringify({ starting_capital: startingCapital, dry_run: dryRun, ...options }),
     });
     return res.json();
   },
@@ -50,6 +49,11 @@ export const API = {
     return res.json();
   },
 
+  async getLiveScan() {
+    const res = await fetch(`${API_BASE}/api/live/scan`);
+    return res.json();
+  },
+
   // Wallet
   async connectWallet(walletAddress, signature = null) {
     const res = await fetch(`${API_BASE}/api/wallet/connect`, {
@@ -70,6 +74,15 @@ export const API = {
 
   async getCurrentWallet() {
     const res = await fetch(`${API_BASE}/api/wallet/current`);
+    return res.json();
+  },
+
+  async withdrawProfits(amount, destinationAddress) {
+    const res = await fetch(`${API_BASE}/api/withdraw`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount, destination_address: destinationAddress }),
+    });
     return res.json();
   },
 
