@@ -3,9 +3,13 @@
  * This module provides functions to communicate with the bot API.
  */
 
+const configuredApiBase = (import.meta as any).env?.VITE_API_URL as string | undefined;
+const isHttpsPage = typeof window !== "undefined" && window.location.protocol === "https:";
+
 const API_BASE: string =
-  (import.meta as any).env?.VITE_API_URL ||
-  "http://164.92.241.83:5000";
+  configuredApiBase && !(isHttpsPage && configuredApiBase.startsWith("http://"))
+    ? configuredApiBase
+    : "/api";
 
 export const API = {
   // Status endpoints
